@@ -71,11 +71,21 @@ def load_prices(symbols):
         except Exception:
             failed += batch
             continue
+        # Yahoo sometimes publishes the latest NSE daily candle late.
+        # Hourly candles of the last few days are used to fill any gap.
+        try:
+            hourly = yf.download(tick, period="5d", interval="60m", auto_adjust=True,
+                                 group_by="ticker", threads=True, progress=False)
+        except Exception:
+            hourly = None
         for s, t in zip(batch, tick):
             try:
                 g = raw[t] if len(tick) > 1 else raw
                 g = g.rename(columns=str.lower)[["open", "high", "low", "close"]].dropna()
-                g.index = pd.to_datetime(g.index).tz_localize(None)
+                g.index = _to_ist_dates(g.index)
+                if hourly is not None:
+                    hh = hourly[t] if len(tick) > 1 else hourly
+                    g = fill_from_hourly(g, hh)
                 if len(g) >= 60:
                     out[s] = g
                 else:
@@ -83,6 +93,37 @@ def load_prices(symbols):
             except Exception:
                 failed.append(s)
     return out, failed
+
+
+def _to_ist_dates(idx):
+    idx = pd.to_datetime(idx)
+    if idx.tz is not None:
+        idx = idx.tz_convert(IST).tz_localize(None)
+    return idx.normalize()
+
+
+def session_complete(day):
+    """True if the NSE session on `day` has finished (after 15:30 IST)."""
+    now = datetime.now(IST)
+    return day < now.date() or (day == now.date() and now.time() >= dtime(15, 30))
+
+
+def fill_from_hourly(daily, hourly):
+    """Append completed sessions that exist in hourly data but not in daily."""
+    h = hourly.rename(columns=str.lower)[["open", "high", "low", "close"]].dropna()
+    if h.empty:
+        return daily
+    h.index = pd.to_datetime(h.index)
+    if h.index.tz is not None:
+        h.index = h.index.tz_convert(IST).tz_localize(None)
+    agg = h.groupby(h.index.normalize()).agg(
+        open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last"))
+    last = daily.index.max() if len(daily) else pd.Timestamp.min
+    new = agg[(agg.index > last) & [session_complete(d.date()) for d in agg.index]]
+    if new.empty:
+        return daily
+    new = new.assign(filled=True)
+    return pd.concat([daily.assign(filled=False), new]).sort_index()
 
 
 def market_open_now():
@@ -96,9 +137,10 @@ with st.sidebar:
     capital = st.number_input("Capital (₹)", 10000, 100_000_000, 100000, step=10000)
     risk = st.number_input("Risk per trade (%)", 0.1, 5.0, 1.0, step=0.1)
     live = market_open_now()
-    use_live = st.toggle("Use today's live candle", value=False,
-                         help="Rules are based on completed daily candles. Keep OFF during "
-                              "market hours; turn ON only to preview today's possible setups.")
+    use_live = st.toggle("Preview with today's unfinished candle", value=False,
+                         help="Keep OFF. The rules use completed daily candles. ON only "
+                              "previews possible setups during market hours - they can "
+                              "disappear by the close.")
     if st.button("🔄 Refresh data", width="stretch"):
         load_prices.clear()
         st.rerun()
@@ -127,6 +169,21 @@ if partial and not use_live:
 res = core.scan_universe(scan_prices, capital, risk)
 scan_date = max(p.index[-1] for p in scan_prices.values()).date()
 
+# expected latest completed session (weekends skipped; NSE holidays not known)
+exp = datetime.now(IST).date()
+while not session_complete(exp) or exp.weekday() >= 5:
+    exp -= pd.Timedelta(days=1)
+n_filled = sum(bool(p["filled"].iloc[-1]) for p in prices.values() if "filled" in p)
+if partial and use_live:
+    st.warning("⚠️ PREVIEW MODE: signals use today's unfinished candle and may disappear "
+               "by the close. Switch the toggle off for real signals.")
+if scan_date < exp and not OFFLINE_CSV and not (partial and use_live):
+    st.warning(f"Data ends **{scan_date:%d %b}** but the last completed session should be "
+               f"**{exp:%d %b}** (unless it was an NSE holiday). Yahoo hasn't published it yet - "
+               "tap **Refresh data** later.")
+if n_filled:
+    st.info(f"Latest candle for {n_filled} stocks was built from Yahoo hourly data "
+            "(daily candle not yet published). Close may differ slightly from NSE's official close.")
 st.caption(f"Signals based on candles up to **{scan_date:%d %b %Y}** · "
            f"{len(prices)} stocks · {uni_src}"
            + (" · 🟢 market open, live prices shown" if partial else "")
