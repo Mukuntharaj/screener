@@ -1,10 +1,26 @@
-# Momentum + EMA20 Retest Screener (Nifty 500)
+# Stock Screeners: Momentum Retest + F&O CPR Patterns
 
-Web app that lists the stocks meeting the strategy rules. It works in any
-browser on a laptop or phone.
+A web app with two pages (switch between them in the sidebar). It works in
+any browser on a laptop or phone.
 
-Files: `app.py` (the app) · `screener_core.py` (the rules) ·
-`nifty500.csv` (fallback stock list) · `requirements.txt`
+1. **📈 Momentum Retest**: Nifty 500, daily candles (20% week, then EMA20 retest).
+2. **🎯 F&O CPR Patterns**: F&O stocks only, 15-min or 1-hour candles, with
+   10–20-day candlestick charts. It lists:
+   - **Double/triple bottoms below CPR at S1.** Trigger: a close above the
+     neckline.
+   - **Double/triple tops above CPR, below R1.** Trigger: a close below the
+     neckline.
+
+   Only stocks whose daily candle passes the EMA20/EMA50 filter are scanned.
+
+| File | Purpose |
+|---|---|
+| `app.py` | Entry point and page menu |
+| `momentum_page.py`, `screener_core.py` | Momentum screener |
+| `cpr_page.py`, `cpr_core.py` | F&O CPR pattern screener and charts |
+| `data_utils.py` | Yahoo/NSE data loading |
+| `nifty500.csv`, `fo_stocks.csv` | Fallback stock lists |
+| `requirements.txt` | Packages (now includes `plotly`) |
 
 ---
 
@@ -25,8 +41,7 @@ the laptop is on and the app is running.
 
 1. Create a free GitHub account and make a new repository
    (for example `momentum-screener`). It can be private.
-2. Upload the 4 files: `app.py`, `screener_core.py`, `nifty500.csv` and
-   `requirements.txt`.
+2. Upload **all 9 files** from the table above (same folder, no subfolders).
 3. Go to https://share.streamlit.io, sign in with GitHub, and click
    **Create app**. Pick your repository, branch `main`, and file `app.py`.
    Click **Deploy**.
@@ -48,6 +63,17 @@ wakes it up in about 1 minute.
 - **During market hours:** keep "Use today's live candle" **off**. Signals
   are based on completed daily candles. The *Live* and *Triggered?* columns
   show today's price action.
+
+## F&O CPR page: quick use
+- In the sidebar, pick **15 min** or **1 hour**, the **daily trend filter**
+  (default: close above both EMA20 and EMA50), and the pattern types.
+- **Bottoms @ S1** and **Tops below R1** tabs: *Buy above* / *Sell below*
+  is the neckline, with the SL and targets T1/T2 (the next CPR levels).
+- **Charts** tab: 10–20 days of candles with each day's CPR band, P, R1 and
+  S1, plus the pattern points and neckline. Use **Pattern zoom** on a phone.
+- Detection settings can be adjusted under *Fine-tune detection*.
+- The F&O list is fetched from NSE. If that fails, the app uses the bundled
+  `fo_stocks.csv` (216 stocks, Nov 2026).
 
 ## Notes
 - Prices come from Yahoo Finance (`SYMBOL.NS`), adjusted for splits and
